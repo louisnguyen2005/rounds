@@ -6,7 +6,7 @@ from pathlib import Path
 from flask import abort, request, session
 
 from models import Shop
-from models.outfits import OutfitStorage
+from models.outfits import OutfitStorage, StorageLimitReached
 from .common import page, patched, user_required
 
 
@@ -44,12 +44,15 @@ def register(app):
         name = str(manifest.get("name", "Bộ phối mới"))[:80]
         # Ghi chú stylist là dữ liệu riêng: không lưu vào designs hay bản manifest công khai.
         public_manifest = json.dumps(manifest, ensure_ascii=False)
+        token = None
+        try:
+            storage.save_manifest(public_manifest)
+            if note is not None:
+                token = storage.save_note(session["uid"], name, note)
+        except StorageLimitReached:
+            abort(507)
         with Shop() as db:
             db.create_outfit((session["uid"], name, public_manifest))
-        storage.save_manifest(public_manifest)
-        token = None
-        if note is not None:
-            token = storage.save_note(session["uid"], name, note)
         return page("Bản phối đã lưu", preview_text=target.read_text(encoding="utf-8"), outfit_token=token)
 
 

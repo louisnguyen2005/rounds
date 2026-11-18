@@ -1,4 +1,4 @@
-"""ECDSA signing exercise with deliberately reusable nonce in vulnerable mode."""
+"""Request handlers for the ECDSA signing service."""
 import hashlib
 import hmac
 
@@ -8,12 +8,6 @@ OPERATIONS = ['targets', 'pubkey', 'sign', 'unlock']
 
 
 def vulnerable_nonce(service, message):
-    """Model a nonce-cache bug keyed by a message with its 3-char suffix dropped.
-
-    Signatures for messages sharing the same stem reuse k. The checker signs its
-    two probe messages with the same 24-hex request id and different 3-char
-    suffixes, so its normal signature checks remain valid.
-    """
     stem = message[:-3] if len(message) > 3 else message
     key = int(service.nonce).to_bytes(32, 'big')
     digest = hmac.new(key, b'ecdsa-context-v2\0' + stem.encode(), hashlib.sha256).digest()

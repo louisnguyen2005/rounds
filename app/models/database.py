@@ -9,10 +9,14 @@ from werkzeug.security import generate_password_hash
 
 from settings import ROOT, TASKS
 
+SQLITE_MAX_PAGES = 32768  # 128 MiB per database at SQLite's default 4 KiB page size.
+
 
 def connect(path):
     con = sqlite3.connect(path, timeout=10)
     con.row_factory = sqlite3.Row
+    con.execute(f"PRAGMA max_page_count={SQLITE_MAX_PAGES}")
+    con.execute("PRAGMA busy_timeout=10000")
     return con
 
 

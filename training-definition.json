@@ -39,7 +39,7 @@
       "order": 2,
       "estimated_duration": 60,
       "minimal_possible_solve_time": null,
-      "content": "Sau khi BTC mở vòng, bạn có 10 phút xem đề. Tiếp theo là 50 phút thi, gồm 10 tick, mỗi tick 5 phút. Điểm vòng Web được giữ lại.\n\nTiếp tục dùng VM đội từ vòng 1. Mở `~/crypto-lab/README.md` và `~/crypto-lab/host_port.txt` để xem cách kết nối và danh sách đối thủ. Ba dịch vụ là **Curveball** (TCP `9011`), **Padding Oracle** (TCP `9012`) và **ECDSA Nonce** (TCP `9013`).\n\nDùng `nc IP PORT`, gửi `{\"op\":\"info\"}` để xem giao thức và `{\"op\":\"targets\"}` để lấy ID bản ghi đã có flag. Vá source trên VM đội mình tại `/opt/meko-crypto/`. Nộp flag thật qua scoreboard do BTC cung cấp khi vòng 2 đang mở. Việc bấm tiếp tục trong CyberRange chỉ chuyển trang hướng dẫn."
+      "content": "Sau khi BTC mở vòng, bạn có 10 phút xem đề. Tiếp theo là 50 phút thi, gồm 10 tick, mỗi tick 5 phút. Điểm vòng Web được giữ lại.\n\nTiếp tục dùng VM đội từ vòng 1. Hướng dẫn challenge và cách kết nối nằm trong `~/crypto-lab/README.md`; địa chỉ và cổng của các đội khác nằm trong `~/crypto-lab/host_port.txt`. Các dịch vụ chạy trên VM đội đích, kết nối trực tiếp bằng `ncat IP PORT`.\n\nNộp flag thật qua scoreboard do BTC cung cấp khi vòng 2 đang mở. Việc bấm tiếp tục trong CyberRange chỉ chuyển trang hướng dẫn."
     }
   ]
 }

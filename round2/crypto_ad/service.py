@@ -25,6 +25,11 @@ CHALLENGES = {
     'ecdsa_nonce': ecdsa_nonce,
 }
 
+SQLITE_MAX_PAGES = 8192  # 32 MiB per challenge database.
+MAX_FLAGS = 8192
+MAX_REQUESTS_PER_CONNECTION = 100
+MAX_CONNECTIONS_PER_SOURCE = 8
+
 
 class Service:
     def __init__(self, name, config):
@@ -48,9 +53,13 @@ class Service:
     def connect(self):
         db = sqlite3.connect(self.path, timeout=15)
         db.execute('PRAGMA journal_mode=WAL')
+        db.execute(f'PRAGMA max_page_count={SQLITE_MAX_PAGES}')
+        db.execute('PRAGMA busy_timeout=15000')
         return db
 
     def flag(self, record):
+        if not isinstance(record, str) or len(record) > 100:
+            raise ValueError('record')
         with self.connect() as db:
             row = db.execute('SELECT value FROM flags WHERE id=?', (record,)).fetchone()
         if not row:
@@ -70,18 +79,25 @@ class Service:
             if op == 'get':
                 return {'ok': True, 'flag': self.flag(req['record'])}
             if op == 'prune':
+                before_tick = int(req['before_tick'])
+                if not 0 <= before_tick <= 1000000:
+                    raise ValueError('before_tick')
                 with self.connect() as db:
-                    db.execute('DELETE FROM flags WHERE tick < ?', (int(req['before_tick']),))
+                    db.execute('DELETE FROM flags WHERE tick < ?', (before_tick,))
                 return {'ok': True}
             record, flag, tick = req['record'], req['flag'], int(req['tick'])
             if not isinstance(record, str) or not re.fullmatch(r'[a-f0-9]{24}', record):
                 raise ValueError('record')
             if not isinstance(flag, str) or not re.fullmatch(r'MekoDataCTF\{[a-f0-9]{32}\}', flag):
                 raise ValueError('flag')
+            if not 0 <= tick <= 1000000:
+                raise ValueError('tick')
             with self.connect() as db:
                 existing = db.execute('SELECT value,tick FROM flags WHERE id=?', (record,)).fetchone()
                 if existing and existing != (flag, tick):
                     return {'ok': False, 'error': 'record_conflict'}
+                if not existing and db.execute('SELECT count(*) FROM flags').fetchone()[0] >= MAX_FLAGS:
+                    return {'ok': False, 'error': 'storage_limit'}
                 db.execute('INSERT OR IGNORE INTO flags VALUES (?,?,?)', (record, flag, tick))
             return {'ok': True, 'record': record}
         if op == 'targets':
@@ -96,11 +112,13 @@ class Service:
             return {'ok': False, 'error': 'invalid_request'}
         try:
             return self.dispatch(req)
-        except (ValueError, KeyError, TypeError, AssertionError, OverflowError):
+        except (ValueError, KeyError, TypeError, AssertionError, OverflowError,
+                RecursionError, sqlite3.Error):
             return {'ok': False, 'error': 'invalid_request'}
 
 
 def serve_stream(service, source, output):
+    requests = 0
     while True:
         line = source.readline(MAX_LINE + 1)
         if not line:
@@ -111,10 +129,13 @@ def serve_stream(service, source, output):
             return
         try:
             result = service.handle(json.loads(line))
-        except (ValueError, UnicodeError):
+        except (ValueError, UnicodeError, RecursionError):
             result = {'ok': False, 'error': 'invalid_json'}
         output.write(json.dumps(result, separators=(',', ':')).encode() + b'\n')
         output.flush()
+        requests += 1
+        if requests >= MAX_REQUESTS_PER_CONNECTION:
+            return
 
 
 def main():
@@ -130,7 +151,17 @@ def main():
     if args.stdio:
         serve_stream(app, sys.stdin.buffer, sys.stdout.buffer)
         return
-    slots = threading.BoundedSemaphore(96)
+    slots = threading.BoundedSemaphore(24)
+    source_lock = threading.Lock()
+    source_connections = {}
+
+    def release_source(source):
+        with source_lock:
+            active = source_connections.get(source, 0) - 1
+            if active > 0:
+                source_connections[source] = active
+            else:
+                source_connections.pop(source, None)
 
     class Handler(socketserver.StreamRequestHandler):
         def handle(self):
@@ -145,13 +176,21 @@ def main():
         daemon_threads = True
 
         def process_request(self, request, address):
+            source = address[0]
+            with source_lock:
+                if source_connections.get(source, 0) >= MAX_CONNECTIONS_PER_SOURCE:
+                    request.close()
+                    return
+                source_connections[source] = source_connections.get(source, 0) + 1
             if not slots.acquire(blocking=False):
+                release_source(source)
                 request.close()
                 return
             try:
                 super().process_request(request, address)
             except Exception:
                 slots.release()
+                release_source(source)
                 raise
 
         def process_request_thread(self, request, address):
@@ -159,6 +198,7 @@ def main():
                 super().process_request_thread(request, address)
             finally:
                 slots.release()
+                release_source(address[0])
 
     with Server((args.host, args.port or SERVICES[args.service]), Handler) as server:
         print(f'{args.service} line-JSON listening on {args.host}:{server.server_address[1]}', flush=True)

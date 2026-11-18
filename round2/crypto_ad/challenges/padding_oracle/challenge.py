@@ -1,4 +1,4 @@
-"""Padding-oracle exercise for AES-CBC document records."""
+"""Request handlers for encrypted document records."""
 import hashlib
 import hmac
 import secrets
@@ -22,7 +22,6 @@ def seal(service, plain, record):
 
 
 def _fault_code(service, record, stage):
-    """Return a stable, record-scoped opaque label for the vulnerable oracle."""
     key = bytes.fromhex(service.keys['mac'])
     material = b'padding-oracle-v2\0' + record.encode() + b'\0' + stage.encode()
     return 'fault_' + hmac.new(key, material, hashlib.sha256).hexdigest()[:10]

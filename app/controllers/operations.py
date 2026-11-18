@@ -6,6 +6,7 @@ from flask import abort, redirect, request, session, url_for
 
 from models import Shop
 from settings import VIP_RANK
+from security import auth_failed, auth_succeeded, is_auth_limited
 from .common import page, patched, staff_required
 
 
@@ -35,9 +36,14 @@ def register(app):
     def staff_login():
         if request.method == "GET":
             return page("Đăng nhập nhân viên", form="staff-login")
+        client = request.remote_addr or "unknown"
+        if is_auth_limited(client):
+            return page("Đăng nhập nhân viên", form="staff-login", error="Thử lại sau ít phút."), 429, {"Retry-After": "900"}
         if not app.config["STAFF_PASSWORD"] or not hmac.compare_digest(
                 request.form.get("password", ""), app.config["STAFF_PASSWORD"]):
+            auth_failed(client)
             return page("Đăng nhập nhân viên", form="staff-login", error="Không thể xác thực nhân viên."), 401
+        auth_succeeded(client)
         session["staff"] = True
         return redirect(url_for("staff"))
 

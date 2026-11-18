@@ -44,10 +44,69 @@
   tasks:
     - name: Cài Apache và runtime ứng dụng
       ansible.builtin.apt:
-        name: [apache2, python3-flask, python3-waitress, sudo]
+        name: [apache2, libapache2-mod-evasive, python3-flask, python3-waitress, sudo]
         state: present
         update_cache: true
         cache_valid_time: 3600
+
+    - name: Giảm ảnh hưởng SYN flood và tắt ping echo trên VM đội
+      ansible.posix.sysctl:
+        name: '{{ item.name }}'
+        value: '{{ item.value }}'
+        state: present
+        sysctl_set: true
+        reload: true
+      loop:
+        - {name: net.ipv4.tcp_syncookies, value: '1'}
+        - {name: net.ipv4.tcp_max_syn_backlog, value: '4096'}
+        - {name: net.ipv4.tcp_synack_retries, value: '3'}
+        - {name: net.ipv4.tcp_fin_timeout, value: '15'}
+        - {name: net.core.somaxconn, value: '1024'}
+        - {name: net.ipv4.icmp_echo_ignore_all, value: '1'}
+        - {name: net.ipv4.icmp_echo_ignore_broadcasts, value: '1'}
+
+    - name: Cấu hình hạn mức yêu cầu HTTP theo IP
+      ansible.builtin.copy:
+        dest: /etc/apache2/conf-available/meko-evasive.conf
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          <IfModule mod_evasive20.c>
+            DOSHashTableSize 3097
+            DOSPageCount 30
+            DOSSiteCount 150
+            DOSPageInterval 1
+            DOSSiteInterval 1
+            DOSBlockingPeriod 10
+          </IfModule>
+          <IfModule reqtimeout_module>
+            RequestReadTimeout header=10-20,MinRate=500 body=10,MinRate=500
+          </IfModule>
+      notify: Reload Apache
+
+    - name: Tạo drop-in giới hạn tài nguyên Apache
+      ansible.builtin.file:
+        path: /etc/systemd/system/apache2.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Đặt giới hạn CPU, RAM, tiến trình và file descriptor cho Apache
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/apache2.service.d/meko-limits.conf
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Service]
+          CPUQuota=25%
+          MemoryMax=256M
+          MemorySwapMax=0
+          TasksMax=64
+          LimitNOFILE=256
+      notify: Restart Apache
 
     - name: Đảm bảo thư mục log của Apache tồn tại
       ansible.builtin.file:
@@ -118,6 +177,8 @@
           [Unit]
           Description=Meko Boutique training shop
           After=network.target
+          StartLimitIntervalSec=60
+          StartLimitBurst=5
           [Service]
           User=meko-web
           Group=meko-web
@@ -129,11 +190,23 @@
           EnvironmentFile=/etc/meko-boutique/staff.env
           ExecStart=/usr/bin/python3 /opt/meko-boutique/app.py
           Restart=on-failure
+          RestartSec=2
+          CPUQuota=50%
+          MemoryMax=512M
+          MemorySwapMax=0
+          TasksMax=48
+          LimitNOFILE=128
+          LimitFSIZE=128M
           NoNewPrivileges=true
           PrivateTmp=true
           ProtectSystem=strict
           ProtectHome=true
           ReadWritePaths=/var/lib/meko-boutique
+          ProtectKernelTunables=true
+          ProtectKernelModules=true
+          ProtectControlGroups=true
+          RestrictSUIDSGID=true
+          LockPersonality=true
           [Install]
           WantedBy=multi-user.target
       notify: Restart Meko Boutique
@@ -153,18 +226,43 @@
             ErrorLog ${APACHE_LOG_DIR}/meko-error.log
             CustomLog ${APACHE_LOG_DIR}/meko-access.log combined
           </VirtualHost>
+
+    - name: Giới hạn worker Apache trên VM đội
+      ansible.builtin.copy:
+        dest: /etc/apache2/conf-available/meko-limits.conf
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          <IfModule mpm_event_module>
+            MaxRequestWorkers 24
+            MaxConnectionsPerChild 1000
+          </IfModule>
+          <IfModule mpm_prefork_module>
+            MaxRequestWorkers 24
+            MaxConnectionsPerChild 1000
+          </IfModule>
       notify: Reload Apache
 
     - name: Bật module proxy và site Meko
       ansible.builtin.shell: |
         set -eu
-        a2enmod proxy proxy_http >/dev/null
+        a2enmod proxy proxy_http reqtimeout >/dev/null
+        a2enmod evasive >/dev/null
+        a2enconf meko-limits >/dev/null
+        a2enconf meko-evasive >/dev/null
         a2dissite 000-default >/dev/null 2>&1 || true
         a2ensite 000-meko-boutique >/dev/null
       args:
         executable: /bin/sh
       changed_when: false
       notify: Reload Apache
+
+    - name: Áp dụng systemd drop-in của Apache
+      ansible.builtin.systemd:
+        name: apache2
+        daemon_reload: true
+      changed_when: false
 
     - name: Kiểm tra cấu hình Apache
       ansible.builtin.command: apache2ctl configtest
@@ -207,6 +305,16 @@
       when: meko_desktop_enabled | bool
 
   handlers:
+    - name: Restart Fail2ban
+      ansible.builtin.systemd:
+        name: fail2ban
+        daemon_reload: true
+        state: restarted
+    - name: Restart Apache
+      ansible.builtin.systemd:
+        name: apache2
+        daemon_reload: true
+        state: restarted
     - name: Restart Meko Boutique
       ansible.builtin.systemd:
         name: meko-boutique

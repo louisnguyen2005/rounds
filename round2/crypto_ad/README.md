@@ -1,36 +1,23 @@
-# Vòng 2 · Crypto AD
+# Round 2 · Crypto AD
 
-Ba dịch vụ nhận JSON qua TCP, mỗi yêu cầu trên một dòng. Mỗi challenge có handler và hướng dẫn riêng trong `challenges/<tên>/`; protocol P-256/JSON dùng chung nằm trong `protocol.py`, còn `service.py` là khung TCP, lưu flag và dispatcher.
+Mỗi đội có ba dịch vụ TCP chạy trên VM của mình. Dùng `~/crypto-lab/host_port.txt` để xem địa chỉ và cổng của hai đội còn lại.
 
-| Challenge | Cổng | Chủ đề |
+| Dịch vụ | Cổng | Mô tả |
 | --- | ---: | --- |
-| Curveball | 9011 | Xác thực tham số đường cong P-256 |
-| Padding Oracle | 9012 | Xử lý lỗi khi giải mã AES-CBC |
-| ECDSA Nonce | 9013 | Sử dụng nonce khi ký ECDSA |
+| Curveball | 9011 | Chứng chỉ số trên đường cong elliptic P-256 |
+| Padding Oracle | 9012 | Tài liệu được mã hóa AES-CBC |
+| ECDSA Nonce | 9013 | Chữ ký số ECDSA |
 
-Mã và hướng dẫn theo bài:
-
-- `challenges/curveball/challenge.py` · `challenges/curveball/README.md`
-- `challenges/padding_oracle/challenge.py` · `challenges/padding_oracle/README.md`
-- `challenges/ecdsa_nonce/challenge.py` · `challenges/ecdsa_nonce/README.md`
-
-Trên VM đội, đọc `~/crypto-lab/host_port.txt` để chọn đối thủ. Ví dụ, từ `team1` kết nối Curveball của `team2`.
+Kết nối trực tiếp tới dịch vụ của đội đích bằng `ncat`:
 
 ```bash
-nc 10.90.0.12 9011
+ncat <IP_ĐỘI_ĐÍCH> <CỔNG>
 ```
 
-Gửi `{"op":"info"}` để xem các thao tác của dịch vụ và `{"op":"targets"}` để xem các bản ghi đã được đặt flag. Danh sách ban đầu trống khi dịch vụ mới khởi động. Chờ BTC mở vòng 2 và nộp flag qua scoreboard do BTC cung cấp.
+Ví dụ:
 
-Source trên VM nằm ở `/opt/meko-crypto/`. Sau khi vá trên VM đội mình, khởi động lại đúng dịch vụ. Ví dụ, `sudo systemctl restart meko-crypto@curveball.service`.
-
-Khi sửa một challenge, cập nhật handler riêng trong `challenges/<tên>/challenge.py` và triển khai đúng unit của bài. `service.py`/`protocol.py` là phần dùng chung; thay đổi ở đó cần áp dụng cho toàn bộ các service.
-
-Playbook mặc định cài cả ba challenge khi tạo VM mới. Với pool đã provision, có thể truyền `crypto_ad_deploy_services` để chỉ cập nhật và restart module được chọn. Ví dụ extra-vars của Ansible:
-
-```yaml
-crypto_ad_deploy_services:
-  - curveball
+```bash
+ncat 10.90.0.12 9011
 ```
 
-Các tên hợp lệ là `curveball`, `padding_oracle`, `ecdsa_nonce`. Cách deploy chọn lọc giả định VM đã có đủ ba module từ lần provision đầu. Thay đổi `service.py` hoặc `protocol.py` là thay đổi phần dùng chung và sẽ restart cả ba service.
+Giao tiếp bằng JSON Lines: gửi một đối tượng JSON trên mỗi dòng và đọc phản hồi JSON tương ứng. Có thể dùng `nc` thay cho `ncat` nếu máy đã cài Netcat.

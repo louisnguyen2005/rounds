@@ -1,4 +1,4 @@
-"""Curveball: client-controlled elliptic-curve generator validation exercise."""
+"""Request handlers for the Curveball service."""
 from protocol import G, N, certificate_message, pack_point, sign, unpack_point, verify
 
 OPERATIONS = ['targets', 'ca', 'sample', 'read']

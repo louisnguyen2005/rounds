@@ -2,6 +2,8 @@
 Description=MekoDataCTF Round 2 crypto %i
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 User={{ inventory_hostname }}
@@ -10,11 +12,22 @@ WorkingDirectory=/opt/meko-crypto
 ExecStart=/usr/bin/python3 /opt/meko-crypto/service.py --service %i --config /etc/meko-crypto/service.json --host {{ meko_addresses[inventory_hostname] }}
 Restart=on-failure
 RestartSec=2
+CPUQuota=35%
+MemoryMax=256M
+MemorySwapMax=0
+TasksMax=32
+LimitNOFILE=96
+LimitFSIZE=32M
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
 
 [Install]
 WantedBy=multi-user.target

@@ -9,6 +9,7 @@ from flask import abort, redirect, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from models import Shop
+from security import auth_failed, auth_succeeded, is_auth_limited
 from settings import PUBLIC_RANKS, VIP_RANK
 from .common import b64, current_user, page, user_required
 
@@ -37,10 +38,15 @@ def register(app):
     def login():
         if request.method == "GET":
             return page("Đăng nhập", form="login")
+        client = request.remote_addr or "unknown"
+        if is_auth_limited(client):
+            return page("Đăng nhập", form="login", error="Thử lại sau ít phút."), 429, {"Retry-After": "900"}
         with Shop() as db:
             user = db.find_customer_by_username((request.form.get("username", ""),)).fetchone()
         if not user or not check_password_hash(user["password"], request.form.get("password", "")):
+            auth_failed(client)
             return page("Đăng nhập", form="login", error="Thông tin đăng nhập chưa đúng."), 401
+        auth_succeeded(client)
         session.clear()
         session["uid"] = user["id"]
         session["name"] = user["name"]
@@ -50,7 +56,12 @@ def register(app):
         body = b64(json.dumps({"sub": str(user["id"]), "rank": rank, "exp": int(time.time()) + 3600}).encode())
         signing = head + "." + body
         token = signing + "." + b64(hmac.digest(app.extensions["boutique"]["state"]["jwt_secret"].encode(), signing.encode(), "sha256"))
-        response = redirect(request.args.get("next") or url_for("home"))
+        # Keep post-login navigation on this host; an attacker-controlled
+        # absolute URL must not turn the login endpoint into an open redirect.
+        destination = request.args.get("next", "")
+        if not destination.startswith("/") or destination.startswith("//") or "\\" in destination:
+            destination = url_for("home")
+        response = redirect(destination)
         response.set_cookie("meko_member", token, httponly=True, samesite="Lax")
         return response
 
